@@ -1,0 +1,235 @@
+
+var COLUMN_NUMBER = {
+  EMAIL: 2,
+  NAME: 3,
+  START_DATE: 4,
+  END_DATE: 5,
+  APPROVAL: 7,
+  NOTIFIED: 8,
+};
+
+var APPROVED_DROPDOWN = {
+  APPROVED: 'APPROVED',
+  NOT_APPROVED: 'NOT APPROVED',
+  IN_PROGRESS: 'IN PROGRESS',
+};
+
+var NOTIFIED_DROPDOWN = {
+  NOTIFIED: 'NOTIFIED',
+  NOT_NOTIFIED: 'NOT NOTIFIED',
+};
+
+var VACATION_REASONS = [
+  'Vacation',
+  'Sick leave',
+  'Maternity/Paternity',
+  'Bereavement',
+  'Leave of absence',
+  'Personal time',
+];
+
+var REJECTION_EMAIL_SUBJECT = 'ERR: Vacation Time Request NOT Approved';
+var EVENT_TITLE = "VACATION FOR ";
+
+
+var MANAGER_EMAIL = 'yoyomade@google.com';
+
+function onOpen() {
+  var sheetUi = SpreadsheetApp.getUi();
+  sheetUi.createMenu('TimeOff')
+      .addItem('Form Setup', 'setUpForm')
+      .addItem('Column Setup', 'createNewColumns')
+      .addItem('Notify Employees', 'notifyEmployees')
+      .addToUi();
+}
+
+function createNewColumns() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var lastCol = sheet.getLastColumn();
+  var lastRow = sheet.getLastRow();
+  var frozenRows = sheet.getFrozenRows();
+  var startRow = frozenRows + 1;
+  var numRows = lastRow - frozenRows;
+
+  sheet.insertColumnAfter(lastCol);
+  sheet.getRange(frozenRows, COLUMN_NUMBER.APPROVAL)
+      .setValue('APPROVAL');
+
+  var approvalColumnRange = sheet.getRange(startRow, COLUMN_NUMBER.APPROVAL,
+      numRows, 1);
+  var dropdownValues = [APPROVED_DROPDOWN.APPROVED, APPROVED_DROPDOWN.NOT_APPROVED, 
+                        APPROVED_DROPDOWN.IN_PROGRESS];
+  var rule = SpreadsheetApp.newDataValidation().requireValueInList(dropdownValues)
+      .build();
+  approvalColumnRange.setDataValidation(rule);
+  approvalColumnRange.setValue(APPROVED_DROPDOWN.IN_PROGRESS);
+  
+  createNotifiedColumn();
+}
+
+function createNotifiedColumn() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var lastCol = sheet.getLastColumn();
+  var lastRow = sheet.getLastRow();
+  var frozenRows = sheet.getFrozenRows();
+  var startRow = frozenRows + 1;
+  var numRows = lastRow - frozenRows;
+  
+  sheet.insertColumnAfter(lastCol); 
+  sheet.getRange(frozenRows, COLUMN_NUMBER.NOTIFIED)
+      .setValue('NOTIFIED STATUS');
+
+  var notifiedColumnRange = sheet.getRange(startRow, COLUMN_NUMBER.NOTIFIED, 
+                                           numRows, 1);
+  var dropdownValues = [NOTIFIED_DROPDOWN.NOTIFIED, NOTIFIED_DROPDOWN.NOT_NOTIFIED];
+  var rule = SpreadsheetApp.newDataValidation().requireValueInList(dropdownValues)
+      .build();
+  notifiedColumnRange.setDataValidation(rule);
+  notifiedColumnRange.setValue(NOTIFIED_DROPDOWN.NOT_NOTIFIED);
+}
+
+function createCalEvent(employeeName, employeeEmail,
+                       startDate, endDate) { 
+    var managerCal = CalendarApp.getCalendarById(MANAGER_EMAIL);
+  
+    var descriptionText = Utilities.formatString('Your vacation time from %s to %s has been approved. Enjoy!',
+                                            startDate, endDate);
+    var event = managerCal.createEvent(EVENT_TITLE + employeeName,
+                                       startDate, endDate, { 
+                                       description: descriptionText, 
+                                       guests: employeeEmail,
+                                       sendInvites: true,
+                                       });
+}
+
+function sendRejectionEmail(employeeEmail, startDate, endDate) {
+
+  var emailBody = Utilities.formatString('Your vacation time request from %s to %s has NOT been approved.',
+                                         startDate, endDate);
+    
+  // Send email.
+  MailApp.sendEmail(employeeEmail, REJECTION_EMAIL_SUBJECT, 
+                        emailBody);
+}
+
+function approvalCase(employeeEmail, employeeName, 
+                       approvalStatus, startDate, endDate) {
+    var sheet = SpreadsheetApp.getActiveSheet();
+    var managerCal = CalendarApp.getCalendarById(MANAGER_EMAIL);
+    
+    if (approvalStatus == APPROVED_DROPDOWN.NOT_APPROVED) {
+
+      sendRejectionEmail(employeeEmail, startDate, endDate);
+      return 'NOTIFY';
+    } else if (approvalStatus == APPROVED_DROPDOWN.APPROVED) {
+
+      createCalEvent(employeeName, employeeEmail,
+                      startDate, endDate);
+      return 'NOTIFY';
+    } else if (approvalStatus == APPROVED_DROPDOWN.IN_PROGRESS) {
+      return 'DO NOT NOTIFY';
+    }
+}
+
+function notifyEmployees() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  var frozenRows = sheet.getFrozenRows();
+  var startRow = frozenRows + 1;
+  var numRows = lastRow - startRow;
+  var numCols = COLUMN_NUMBER.NOTIFY - COLUMN_NUMBER.EMAIL;
+  
+  for (var i = 0; i < numRows; i++) {
+    var currentStartRow = i + startRow;
+
+    var range = sheet.getRange(currentStartRow, COLUMN_NUMBER.EMAIL,
+        1, COLUMN_NUMBER.NOTIFIED - COLUMN_NUMBER.EMAIL + 1);
+    var rangeValues = range.getValues();
+
+    var notifiedStatus = rangeValues[0][COLUMN_NUMBER.NOTIFIED - COLUMN_NUMBER.EMAIL];
+    if (notifiedStatus == NOTIFIED_DROPDOWN.NOTIFIED) {
+      continue;
+    }
+
+    var employeeEmail = rangeValues[0][COLUMN_NUMBER.EMAIL - COLUMN_NUMBER.EMAIL];
+    var employeeName = rangeValues[0][COLUMN_NUMBER.NAME - COLUMN_NUMBER.EMAIL];    
+    var startDate = rangeValues[0][COLUMN_NUMBER.START_DATE - COLUMN_NUMBER.EMAIL];
+    var endDate = rangeValues[0][COLUMN_NUMBER.END_DATE - COLUMN_NUMBER.EMAIL];
+    var approvalStatus = rangeValues[0][COLUMN_NUMBER.APPROVAL - COLUMN_NUMBER.EMAIL];
+    
+    var notifyKey = approvalCase(employeeEmail, employeeName, approvalStatus,
+                  startDate, endDate);
+    
+
+    if (notifyKey == 'NOTIFY'){
+      sheet.getRange(currentStartRow, COLUMN_NUMBER.NOTIFIED)
+      .setValue(NOTIFIED_DROPDOWN.NOTIFIED);
+    }
+  }
+}
+
+function setUpForm() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (sheet.getFormUrl()) {
+    var msg = 'Form already exists. Unlink the form and try again.';
+    SpreadsheetApp.getUi().alert(msg);
+    return;
+  }
+  
+
+  var form = FormApp.create('Vacation Time Requests')
+      .setCollectEmail(true)
+      .setDestination(FormApp.DestinationType.SPREADSHEET, sheet.getId())
+      .setLimitOneResponsePerUser(false);
+  form.addTextItem().setTitle('Employee Name:').setRequired(true);
+  form.addTextItem().setTitle('Start Date:').setRequired(true);
+  form.addDateItem().setTitle('End Date:').setRequired(true);
+  form.addListItem().setTitle('Reason:').setChoiceValues(VACATION_REASONS);
+
+  ScriptApp.newTrigger('onFormSubmit')
+      .forForm(form)
+      .onFormSubmit()
+      .create(); 
+}
+
+function onFormSubmit(event) {
+  var response = getResponsesByName(event.response);
+  sendFormSubmitEmail(response);
+
+  var row = ['New',
+    '',
+    response['Emoloyee Email:'],
+    response['Employee Name:'],
+    response['Start Date:'],
+    response['End Date:'],
+    response['Reason:']];
+  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+  sheet.appendRow(row);
+}
+
+function getResponsesByName(response) {
+  var initialValue = {
+    email: response.getRespondentEmail(),
+    timestamp: response.getTimestamp(),
+  };
+  return response.getItemResponses().reduce(function(obj, itemResponse) {
+    var key = itemResponse.getItem().getTitle();
+    obj[key] = itemResponse.getResponse();
+    return obj;
+  }, initialValue);
+}
+ 
+
+function sendFormSubmitEmail(request) {
+  var template = HtmlService.createTemplateFromFile('new-vacationtime-request.html');
+  template.request = request;
+  template.sheetUrl = SpreadsheetApp.getActiveSpreadsheet().getUrl();
+  var msg = template.evaluate();
+  
+  MailApp.sendEmail({
+    to: MANAGER_EMAIL,
+    subject: 'New Vacation Time Request',
+    htmlBody: msg.getContent(),
+  });
+}
